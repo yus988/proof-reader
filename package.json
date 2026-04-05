@@ -3,19 +3,52 @@
   "private": true,
   "version": "2.0.0",
   "type": "module",
+  "main": "electron.js",
   "scripts": {
     "dev": "vite",
     "server": "node server.js",
     "start": "node start.js",
     "build": "vite build",
+    "electron:dev": "electron .",
+    "electron:build": "vite build && electron-builder",
     "preview": "vite preview"
   },
   "dependencies": {
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "@openai/codex": "*",
+    "@google/gemini-cli": "*"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
-    "vite": "^6.0.0"
+    "vite": "^6.0.0",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.proofread-viewer",
+    "productName": "校正ビューワー",
+    "files": [
+      "dist/**/*",
+      "server.js",
+      "start.js",
+      "electron.js",
+      "src/prompt.txt",
+      "data/data.sample.json",
+      "node_modules/@openai/codex/**/*",
+      "node_modules/@google/gemini-cli/**/*"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
   }
 }
