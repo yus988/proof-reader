@@ -58,6 +58,31 @@ npm run dev
 | `corrected_md` | 校正後テキスト。`**太字**` の Markdown 記法に対応 |
 | `annotations` | 修正箇所と理由の配列。ビューワー上で点線+ツールチップとして表示される |
 
+## note.com 連携（Bookmarklet）
+
+note.com の下書きから直接テキストを取得し、校正後に貼り戻すワークフローを Bookmarklet でサポートしています。
+
+### セットアップ
+
+`bookmarklets.html` をブラウザで開き、ボタンをブックマークバーにドラッグしてください。
+
+```bash
+# ローカルで開く場合
+start bookmarklets.html   # Windows
+open bookmarklets.html    # macOS
+```
+
+### ワークフロー
+
+1. note.com のエディタで下書きを開く
+2. **「note テキスト取得」** Bookmarklet をクリック → テキストがクリップボードにコピーされる
+3. Claude Code で `/proofread <貼り付け>` を実行 → `data/data.json` が生成される
+4. `npm run dev` でビューワーを開き、校正結果を確認
+5. ビューワーの「全文コピー」ボタンで校正済みテキストをコピー
+6. note.com のエディタに戻り、テキストを差し替える
+
+詳細は `bookmarklets.html` を参照してください。
+
 ## ビューワーの機能
 
 - **並列表示 / インライン表示** の切り替え

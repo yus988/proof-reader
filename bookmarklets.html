@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>校正ビューワー - Bookmarklet</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Meiryo', 'Hiragino Sans', sans-serif; background: #faf7f2; color: #2c2825; line-height: 1.8; padding: 40px 20px; }
+  .container { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 22px; margin-bottom: 8px; }
+  .subtitle { font-size: 13px; color: #8a8078; margin-bottom: 32px; }
+  h2 { font-size: 17px; margin: 32px 0 12px; padding-bottom: 6px; border-bottom: 1px solid #e2dbd2; }
+  h3 { font-size: 15px; margin: 20px 0 8px; }
+  p, li { font-size: 14px; }
+  ul, ol { padding-left: 1.5em; margin: 8px 0; }
+  li { margin: 4px 0; }
+  code { background: #f3efe9; padding: 2px 6px; border-radius: 3px; font-size: 13px; }
+
+  .bookmarklet-area {
+    background: #fff; border: 1px solid #e2dbd2; border-radius: 8px;
+    padding: 20px; margin: 16px 0;
+  }
+  .bookmarklet-link {
+    display: inline-block; padding: 10px 24px; border-radius: 6px;
+    background: #b44d2d; color: #fff; text-decoration: none;
+    font-weight: 600; font-size: 14px; cursor: grab;
+  }
+  .bookmarklet-link:hover { opacity: 0.85; }
+  .bookmarklet-link.green { background: #1a6b2c; }
+  .drag-hint { font-size: 12px; color: #8a8078; margin-top: 8px; }
+
+  .flow { background: #fff; border: 1px solid #e2dbd2; border-radius: 8px; padding: 20px; margin: 16px 0; }
+  .flow ol { padding-left: 1.2em; }
+  .flow li { margin: 6px 0; }
+  .flow .arrow { color: #b44d2d; font-weight: 700; }
+
+  .note { background: #f3efe9; border-left: 3px solid #b44d2d; padding: 12px 16px; margin: 16px 0; font-size: 13px; }
+
+  .selector-list { margin: 8px 0; }
+  .selector-list code { display: inline-block; margin: 2px 4px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>校正ビューワー - Bookmarklet</h1>
+<p class="subtitle">note.com の下書きテキストを取得・校正・反映するためのツール</p>
+
+<h2>ワークフロー</h2>
+<div class="flow">
+<ol>
+  <li>note.com のエディタで下書きを開く</li>
+  <li><span class="arrow">&rarr;</span> <strong>「note テキスト取得」</strong> Bookmarklet をクリック &rarr; テキストがクリップボードにコピーされる</li>
+  <li><span class="arrow">&rarr;</span> Claude Code で <code>/proofread &lt;貼り付け&gt;</code> を実行 &rarr; <code>data/data.json</code> が生成される</li>
+  <li><span class="arrow">&rarr;</span> <code>npm run dev</code> でビューワーを開き、校正結果を確認</li>
+  <li><span class="arrow">&rarr;</span> ビューワーの「全文コピー」ボタンで校正済みテキストをコピー</li>
+  <li><span class="arrow">&rarr;</span> note.com のエディタに戻り、テキストを差し替える</li>
+</ol>
+</div>
+
+<h2>Bookmarklet のセットアップ</h2>
+<p>以下のボタンを<strong>ブックマークバーにドラッグ</strong>してください。</p>
+
+<h3>1. テキスト取得（note &rarr; クリップボード）</h3>
+<div class="bookmarklet-area">
+  <a class="bookmarklet-link" href="javascript:void(function(){var s=['.p-editor__body','.ProseMirror','[contenteditable=true]','.note-common-styles__textnote-body','article','.o-noteContentText'];var el=null;for(var i=0;i<s.length;i++){el=document.querySelector(s[i]);if(el&&el.innerText.trim().length>50)break;el=null;}if(!el){var ces=document.querySelectorAll('[contenteditable=true]');for(var j=0;j<ces.length;j++){if(ces[j].innerText.trim().length>50){el=ces[j];break;}}}if(!el){alert('エディタが見つかりませんでした。\nnote.com の編集画面で実行してください。');return;}var t=el.innerText.trim();navigator.clipboard.writeText(t).then(function(){var d=document.createElement('div');d.textContent='\u2713 '+t.length+' \u6587\u5b57\u30b3\u30d4\u30fc\u3057\u307e\u3057\u305f';d.style.cssText='position:fixed;top:20px;right:20px;background:#1a6b2c;color:#fff;padding:12px 20px;border-radius:8px;font:600 14px sans-serif;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,.3)';document.body.appendChild(d);setTimeout(function(){d.remove();},2000);}).catch(function(){prompt('\u30af\u30ea\u30c3\u30d7\u30dc\u30fc\u30c9\u30a2\u30af\u30bb\u30b9\u5931\u6557\u3002\u624b\u52d5\u3067\u30b3\u30d4\u30fc\u3057\u3066\u304f\u3060\u3055\u3044\uff1a',t);});}())">&#x1F4CB; note ��キスト取得</a>
+  <div class="drag-hint">&uarr; ブックマークバーにドラッグしてください</div>
+</div>
+
+<h3>2. セレクタ確認（デバ��グ用）</h3>
+<div class="bookmarklet-area">
+  <a class="bookmarklet-link green" href="javascript:void(function(){var s=['.p-editor__body','.ProseMirror','[contenteditable=true]','.note-common-styles__textnote-body','article','.o-noteContentText'];var r=[];for(var i=0;i<s.length;i++){var el=document.querySelector(s[i]);r.push(s[i]+': '+(el?el.innerText.trim().substring(0,60)+'... ('+el.innerText.trim().length+'\u6587\u5b57)':'\u2014 not found'));}var ces=document.querySelectorAll('[contenteditable=true]');r.push('\n--- contenteditable \u8981\u7d20: '+ces.length+'\u500b ---');for(var j=0;j<ces.length;j++){var t=ces[j].innerText.trim();r.push('#'+j+' <'+ces[j].tagName.toLowerCase()+'.'+ces[j].className.split(' ').join('.')+'> '+t.substring(0,50)+'... ('+t.length+'\u6587\u5b57)');}alert(r.join('\n'));}())">&#x1F50D; セレクタ確認</a>
+  <div class="drag-hint">&uarr; エディタの DOM 構造を確認したいときに使います</div>
+</div>
+
+<h2>セレクタが合わない場合</h2>
+<p>note.com のエディタ DOM が変更され、テキスト取得に失敗する場合は以下の手順で対応できます。</p>
+<ol>
+  <li><strong>「セレクタ確認」</strong>Bookmarklet を note.com の編集画面で実行する</li>
+  <li>表示されたダイアログから、本文テキストが入っている要素のセレクタを特定する</li>
+  <li>このページの Bookmarklet コード内のセレクタ配列 <code>var s=[...]</code> を更新する</li>
+</ol>
+
+<div class="note">
+  <strong>現在試行するセレクタ（優先順）:</strong>
+  <div class="selector-list">
+    <code>.p-editor__body</code>
+    <code>.ProseMirror</code>
+    <code>[contenteditable=true]</code>
+    <code>.note-common-styles__textnote-body</code>
+    <code>article</code>
+    <code>.o-noteContentText</code>
+  </div>
+  <p style="margin-top:8px">上記で見つからない場合、<code>contenteditable=true</code> の全要素から 50 文字以上のものを自動検出します。</p>
+</div>
+
+<h2>注意事項</h2>
+<ul>
+  <li>Bookmarklet は <strong>note.com の編集画面</strong>（エディタが開いた状態）で実行してください</li>
+  <li>取得されるのはプレーンテキストです。画像や埋め込みは含まれません</li>
+  <li>校正後のテキストを note に戻す際は、手動で貼り付けてください（エディタの内部状態を壊さないため）</li>
+  <li>note.com の DOM 構造は予告なく変更される場合があります。動作しなくなったら「セレクタ確認」で調査してください</li>
+</ul>
+
+</div>
+</body>
+</html>
