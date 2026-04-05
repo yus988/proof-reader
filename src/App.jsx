@@ -171,18 +171,18 @@ function InputScreen({ onStartProofread, onViewResults, hasResults, serverOk }) 
         <Section label={
           <span style={{ cursor: "pointer" }} onClick={() => setShowCustom(!showCustom)}>
             カスタム指示 {showCustom ? "\u25B4" : "\u25BE"}
+            {customInstructions && !showCustom && <span style={{ fontSize: 10, color: C.addText, marginLeft: 8 }}>設定済み</span>}
           </span>
         }>
           {showCustom && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <textarea value={customInstructions} onChange={e => setCustomInstructions(e.target.value)}
-                placeholder="校正の追加ルールや注意点を記述（例：固有名詞のリスト、ターゲット読者、文体の指定など）"
-                style={{ fontFamily: F, fontSize: 13, lineHeight: 1.6, padding: 12, minHeight: 120,
-                  border: `1px solid ${C.border}`, borderRadius: 6, background: C.surface, color: C.text, resize: "vertical", outline: "none" }} />
-              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                <button onClick={saveWorkflow} style={{ fontFamily: F, fontSize: 11, padding: "4px 12px", borderRadius: 4, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, cursor: "pointer" }}>保存</button>
-              </div>
-            </div>
+            <CustomInstructionsPanel
+              value={customInstructions}
+              onChange={setCustomInstructions}
+              onSave={saveWorkflow}
+              provider={provider}
+              model={model}
+              serverOk={serverOk}
+            />
           )}
         </Section>
 
@@ -205,6 +205,106 @@ function InputScreen({ onStartProofread, onViewResults, hasResults, serverOk }) 
           校正する
         </button>
       </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════
+   CUSTOM INSTRUCTIONS PANEL + WORKFLOW BUILDER
+   ══════════════════════════════════════ */
+
+function CustomInstructionsPanel({ value, onChange, onSave, provider, model, serverOk }) {
+  const [showWizard, setShowWizard] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [wizardAnswers, setWizardAnswers] = useState({
+    contentType: "", audience: "", style: "", depth: "", focus: "", terms: "", other: "",
+  });
+
+  const loadTemplate = async () => {
+    try {
+      const res = await fetch(`${API}/workflow-template`);
+      const { content } = await res.json();
+      if (content) onChange(content);
+    } catch {}
+  };
+
+  const generateWorkflow = async () => {
+    setGenerating(true);
+    try {
+      const res = await fetch(`${API}/generate-workflow`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, model, answers: wizardAnswers }),
+      });
+      const { content, error } = await res.json();
+      if (error) throw new Error(error);
+      if (content) { onChange(content); setShowWizard(false); }
+    } catch (e) {
+      alert("生成失敗: " + e.message);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const questions = [
+    { key: "contentType", label: "コンテンツの種類", placeholder: "例：技術ブログ、活動報告、プレスリリース、SNS投稿" },
+    { key: "audience", label: "ターゲット読者", placeholder: "例：一般読者、エンジニア、投資家、社内メンバー" },
+    { key: "style", label: "文体", placeholder: "例：です・ます調、丁寧で率直、フォーマル" },
+    { key: "depth", label: "校正の深さ", placeholder: "例：表記統一のみ、構成の組み替えまで含む" },
+    { key: "focus", label: "特に気をつけたい点", placeholder: "例：固有名詞の正確性、冗長な表現の削減、結論の前出し" },
+    { key: "terms", label: "固有名詞・専門用語", placeholder: "例：Hapbeat, JLCPCB, ESP-NOW, BT=Bluetooth" },
+    { key: "other", label: "その他の要望", placeholder: "例：図のキャプションは校正対象外、カジュアルすぎる表現を避ける" },
+  ];
+
+  const inputStyle = { fontFamily: F, fontSize: 12, padding: "6px 10px", border: `1px solid ${C.border}`, borderRadius: 4, background: C.surface, color: C.text, outline: "none", width: "100%" };
+  const smallBtn = (onClick, label, disabled) => (
+    <button onClick={onClick} disabled={disabled} style={{ fontFamily: F, fontSize: 11, padding: "4px 12px", borderRadius: 4, border: `1px solid ${C.border}`, background: "transparent", color: disabled ? C.border : C.muted, cursor: disabled ? "not-allowed" : "pointer" }}>{label}</button>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <textarea value={value} onChange={e => onChange(e.target.value)}
+        placeholder="校正の追加ルールや注意点を記述..."
+        style={{ fontFamily: F, fontSize: 13, lineHeight: 1.6, padding: 12, minHeight: 120,
+          border: `1px solid ${C.border}`, borderRadius: 6, background: C.surface, color: C.text, resize: "vertical", outline: "none" }} />
+      <div style={{ display: "flex", gap: 8, justifyContent: "space-between", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 6 }}>
+          {smallBtn(() => setShowWizard(!showWizard), showWizard ? "ウィザードを閉じる" : "AI でワークフロー作成")}
+          {smallBtn(loadTemplate, "テンプレートを読み込み")}
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          {smallBtn(() => onChange(""), "クリア")}
+          {smallBtn(onSave, "保存")}
+        </div>
+      </div>
+
+      {showWizard && (
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 12 }}>
+            ワークフロー作成ウィザード
+          </div>
+          <div style={{ fontSize: 11, color: C.muted, marginBottom: 12 }}>
+            以下の質問に答えると、AI が校正ワークフローを自動生成します。すべて任意です。
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {questions.map(q => (
+              <div key={q.key}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: C.muted, marginBottom: 3 }}>{q.label}</div>
+                <input type="text" value={wizardAnswers[q.key]} placeholder={q.placeholder}
+                  onChange={e => setWizardAnswers(prev => ({ ...prev, [q.key]: e.target.value }))}
+                  style={inputStyle} />
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: 14, display: "flex", justifyContent: "flex-end" }}>
+            <button onClick={generateWorkflow} disabled={generating || !serverOk}
+              style={{ fontFamily: F, fontSize: 13, fontWeight: 600, padding: "8px 20px", borderRadius: 6, cursor: generating ? "wait" : "pointer",
+                border: "none", background: generating ? C.muted : C.accent, color: "#fff" }}>
+              {generating ? "生成中..." : "AI で生成"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

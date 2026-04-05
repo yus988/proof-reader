@@ -8,6 +8,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = 3456;
 const DATA_PATH = join(__dirname, "data", "data.json");
 const WORKFLOW_PATH = join(__dirname, "data", "workflow.md");
+const WORKFLOW_TEMPLATE_PATH = join(__dirname, "data", "workflow-template.md");
 
 /* ══════════════════════════════════════
    PRESETS
@@ -362,6 +363,93 @@ const server = createServer(async (req, res) => {
       await writeFile(WORKFLOW_PATH, content || "", "utf-8");
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
+  // GET /api/workflow-template
+  if (url.pathname === "/api/workflow-template" && req.method === "GET") {
+    try {
+      const content = await readFile(WORKFLOW_TEMPLATE_PATH, "utf-8");
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ content }));
+    } catch {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ content: "" }));
+    }
+    return;
+  }
+
+  // POST /api/generate-workflow — AI でワークフローを生成
+  if (url.pathname === "/api/generate-workflow" && req.method === "POST") {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    try {
+      const { provider, model, answers } = JSON.parse(body);
+      const config = PROVIDERS[provider || "claude"];
+      if (!config) { res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "未対応のプロバイダ" })); return; }
+
+      const prompt = `以下の回答をもとに、テキスト校正のワークフロー（校正ルール文書）を作成してください。
+マークダウン形式で出力してください。コードブロックや余計な囲みは不要です。
+
+## 回答
+
+コンテンツの種類: ${answers.contentType || "未指定"}
+ターゲット読者: ${answers.audience || "未指定"}
+文体: ${answers.style || "未指定"}
+校正の深さ: ${answers.depth || "スタンダード"}
+特に気をつけたい点: ${answers.focus || "特になし"}
+固有名詞・専門用語: ${answers.terms || "特になし"}
+その他の要望: ${answers.other || "特になし"}
+
+## 含めるべき項目
+
+- 基本方針（校正の目的とスコープ）
+- 表記ルール（ひらがな/漢字、数字、スペース等）
+- 文体・トーン
+- 構成・段落のルール
+- 校正の深さ（どこまで手を入れるか）
+- 太字の使い方
+- 校正対象外の項目
+- 必要に応じてファクトチェックのルール`;
+
+      const args = config.args(prompt, model);
+      const child = spawn(config.cmd, args, { windowsHide: true, env: { ...process.env } });
+      let stdout = "";
+      child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+      child.stderr.on("data", () => {});
+      child.on("error", (err) => {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.code === "ENOENT" ? `${config.cmd} が見つかりません` : err.message }));
+      });
+      child.on("close", () => {
+        try {
+          // Extract text from stream-json or raw output
+          let text = "";
+          const lines = stdout.split("\n").filter(Boolean);
+          for (const line of lines) {
+            try {
+              const evt = JSON.parse(line);
+              if (evt.type === "assistant" && evt.message?.content) {
+                for (const block of evt.message.content) { if (block.type === "text") text += block.text; }
+              } else if (evt.type === "result" && typeof evt.result === "string") {
+                text = evt.result;
+              } else if (evt.response) { text = evt.response; }
+              else if (evt.text) { text += evt.text; }
+            } catch { text += line + "\n"; }
+          }
+          // Clean up markdown fences if present
+          text = text.replace(/^```(?:markdown)?\n?/gm, "").replace(/```$/gm, "").trim();
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ content: text }));
+        } catch (e) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: e.message }));
+        }
+      });
     } catch (e) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: e.message }));
