@@ -1,11 +1,27 @@
-import { useState, useRef, useCallback, useMemo } from "react";
-import data from '../data/data.json';
+import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 
-const ORIGINAL = data.original;
-const CORRECTED_MD = data.corrected_md;
-const ANNOTATIONS_DEF = data.annotations;
+const API_BASE = "/api";
 
-/* ── MD解析 ── */
+/* ══════════════════════════════════════
+   STYLES
+   ══════════════════════════════════════ */
+
+const C = {
+  bg: "#faf7f2", surface: "#fff", surfaceAlt: "#f3efe9",
+  text: "#2c2825", muted: "#8a8078", border: "#e2dbd2",
+  accent: "#b44d2d", accentSoft: "#f0ddd5",
+  addBg: "#d6f0d6", addText: "#1a6b2c",
+  delBg: "#fcdcda", delText: "#a4271a",
+  header: "#2c2825", headerText: "#faf7f2",
+  tipBg: "#2c2825", tipText: "#faf7f2",
+  copyFlash: "#e8ddd0",
+};
+const F = "'Meiryo', 'Hiragino Sans', sans-serif";
+
+/* ══════════════════════════════════════
+   MD PARSER / DIFF ENGINE (unchanged)
+   ══════════════════════════════════════ */
+
 function parseMd(md) {
   let plain = "";
   const bolds = [];
@@ -28,32 +44,16 @@ function parseMd(md) {
   return { plain, bolds };
 }
 
-const { plain: CORRECTED, bolds: BOLD_RANGES } = parseMd(CORRECTED_MD);
-const CORRECTED_MD_PARAS = CORRECTED_MD.split("\n\n");
-
-/* ── アノテーション ── */
-function buildPosAnns() {
+function buildPosAnns(original, corrected, annotations) {
   const anns = [];
-  for (const a of ANNOTATIONS_DEF) {
-    const oi = ORIGINAL.indexOf(a.origFrom);
-    const ci = CORRECTED.indexOf(a.corrFrom);
+  for (const a of annotations) {
+    const oi = original.indexOf(a.origFrom);
+    const ci = corrected.indexOf(a.corrFrom);
     if (oi >= 0) anns.push({ start: oi, end: oi + a.origFrom.length, side: "orig", reason: a.reason });
     if (ci >= 0) anns.push({ start: ci, end: ci + a.corrFrom.length, side: "corr", reason: a.reason });
   }
   return anns;
 }
-const POS_ANNS = buildPosAnns();
-
-function getReason(side, posStart, posEnd) {
-  for (const a of POS_ANNS) {
-    if (a.side === side && posStart < a.end && posEnd > a.start) return a.reason;
-  }
-  return null;
-}
-
-/* ══════════════════════════════════════
-   DIFF ENGINE
-   ══════════════════════════════════════ */
 
 function computeDiff(oldText, newText) {
   const oldC = [...oldText], newC = [...newText];
@@ -77,19 +77,22 @@ function computeDiff(oldText, newText) {
   return merged;
 }
 
-function annotateDiff(diff) {
+function annotateDiff(diff, posAnns, boldRanges) {
   let origPos = 0, corrPos = 0;
   const result = [];
+  const getReason = (side, s, e) => {
+    for (const a of posAnns) { if (a.side === side && s < a.end && e > a.start) return a.reason; }
+    return null;
+  };
   for (const d of diff) {
     const len = d.text.length;
     if (d.type === "del") {
-      const reason = getReason("orig", origPos, origPos + len);
-      result.push({ ...d, reason, bold: false });
+      result.push({ ...d, reason: getReason("orig", origPos, origPos + len), bold: false });
       origPos += len;
     } else {
       const startCorr = corrPos;
       const cuts = new Set([0, len]);
-      for (const b of BOLD_RANGES) {
+      for (const b of boldRanges) {
         const rs = b.start - startCorr, re = b.end - startCorr;
         if (rs > 0 && rs < len) cuts.add(rs);
         if (re > 0 && re < len) cuts.add(re);
@@ -101,7 +104,7 @@ function annotateDiff(diff) {
         if (!subText) continue;
         const absFrom = startCorr + from, absTo = startCorr + to;
         let bold = false;
-        for (const b of BOLD_RANGES) { if (absFrom >= b.start && absTo <= b.end) { bold = true; break; } }
+        for (const b of boldRanges) { if (absFrom >= b.start && absTo <= b.end) { bold = true; break; } }
         const reason = d.type === "add" ? getReason("corr", absFrom, absTo) : null;
         result.push({ type: d.type, text: subText, reason, bold });
       }
@@ -125,22 +128,6 @@ function splitIntoParagraphs(adiff) {
   return groups;
 }
 
-/* ══════════════════════════════════════
-   STYLES & UTILS
-   ══════════════════════════════════════ */
-
-const C = {
-  bg: "#faf7f2", surface: "#fff", surfaceAlt: "#f3efe9",
-  text: "#2c2825", muted: "#8a8078", border: "#e2dbd2",
-  accent: "#b44d2d", accentSoft: "#f0ddd5",
-  addBg: "#d6f0d6", addText: "#1a6b2c",
-  delBg: "#fcdcda", delText: "#a4271a",
-  header: "#2c2825", headerText: "#faf7f2",
-  tipBg: "#2c2825", tipText: "#faf7f2",
-  copyFlash: "#e8ddd0",
-};
-const F = "'Meiryo', 'Hiragino Sans', sans-serif";
-
 function copyText(text) {
   if (!text) return;
   try {
@@ -155,31 +142,161 @@ function copyText(text) {
 }
 
 /* ══════════════════════════════════════
-   COMPONENT
+   INPUT SCREEN
    ══════════════════════════════════════ */
 
-export default function DiffViewer() {
+function InputScreen({ onResult }) {
+  const [text, setText] = useState("");
+  const [provider, setProvider] = useState("claude");
+  const [available, setAvailable] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/providers`)
+      .then(r => r.json())
+      .then(setAvailable)
+      .catch(() => setAvailable(null));
+  }, []);
+
+  const handleSubmit = async () => {
+    if (!text.trim()) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/proofread`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, text }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error);
+      // data.json が更新されたので読み込む
+      const dataRes = await fetch(`${API_BASE}/data?` + Date.now());
+      const data = await dataRes.json();
+      onResult(data);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const providers = [
+    { id: "claude", label: "Claude", desc: "Claude Code CLI" },
+    { id: "codex", label: "Codex", desc: "Codex CLI (OpenAI)" },
+    { id: "gemini", label: "Gemini", desc: "Gemini CLI (Google)" },
+  ];
+
+  return (
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: C.bg, fontFamily: F }}>
+      <header style={{ background: C.header, color: C.headerText, padding: "14px 24px",
+        display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
+          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>校正ビューワー</h1>
+          <span style={{ fontSize: 11, opacity: 0.45, letterSpacing: "0.08em" }}>PROOFREAD</span>
+        </div>
+      </header>
+
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: 24, gap: 16, overflow: "auto" }}>
+        {/* プロバイダ選択 */}
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.muted, marginBottom: 8, letterSpacing: "0.06em" }}>
+            プロバイダ
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {providers.map(p => {
+              const isAvailable = available === null || available[p.id];
+              return (
+                <button key={p.id} onClick={() => setProvider(p.id)}
+                  disabled={available !== null && !available[p.id]}
+                  style={{
+                    fontFamily: F, fontSize: 13, fontWeight: 600, padding: "8px 18px", borderRadius: 6, cursor: isAvailable ? "pointer" : "not-allowed",
+                    border: `1.5px solid ${provider === p.id ? C.accent : C.border}`,
+                    background: provider === p.id ? C.accentSoft : "transparent",
+                    color: !isAvailable ? C.border : provider === p.id ? C.accent : C.muted,
+                    transition: "all 0.15s", opacity: isAvailable ? 1 : 0.5,
+                  }}>
+                  {p.label}
+                  <span style={{ fontSize: 10, display: "block", fontWeight: 400, marginTop: 2 }}>{p.desc}</span>
+                  {available !== null && !available[p.id] && (
+                    <span style={{ fontSize: 9, display: "block", color: C.delText }}>未インストール</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          {available === null && (
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>
+              校正サーバーに接続できません。<code style={{ background: C.surfaceAlt, padding: "1px 4px", borderRadius: 2 }}>npm run server</code> を実行してください。
+            </div>
+          )}
+        </div>
+
+        {/* テキスト入力 */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.muted, marginBottom: 8, letterSpacing: "0.06em" }}>
+            校正対象テキスト
+          </div>
+          <textarea
+            value={text}
+            onChange={e => setText(e.target.value)}
+            placeholder="ここに校正したいテキストを貼り付けてください..."
+            style={{
+              flex: 1, fontFamily: F, fontSize: 14, lineHeight: 1.8, padding: 16,
+              border: `1px solid ${C.border}`, borderRadius: 8, background: C.surface,
+              color: C.text, resize: "none", outline: "none",
+            }}
+          />
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 4, textAlign: "right" }}>
+            {text.length} 文字
+          </div>
+        </div>
+
+        {/* エラー表示 */}
+        {error && (
+          <div style={{ background: C.delBg, color: C.delText, padding: "10px 16px", borderRadius: 6, fontSize: 13 }}>
+            {error}
+          </div>
+        )}
+
+        {/* 実行ボタン */}
+        <button onClick={handleSubmit} disabled={loading || !text.trim() || available === null}
+          style={{
+            fontFamily: F, fontSize: 15, fontWeight: 700, padding: "12px 24px", borderRadius: 8,
+            border: "none", cursor: loading ? "wait" : "pointer",
+            background: loading ? C.muted : C.accent, color: "#fff",
+            boxShadow: `0 2px 8px ${C.accent}44`, transition: "background 0.15s",
+            alignSelf: "flex-end",
+          }}>
+          {loading ? "校正中..." : "校正する"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════
+   DIFF VIEWER (existing, now accepts data as prop)
+   ══════════════════════════════════════ */
+
+function DiffViewer({ data, onBack }) {
+  const ORIGINAL = data.original;
+  const CORRECTED_MD = data.corrected_md;
+  const ANNOTATIONS_DEF = data.annotations;
+  const { plain: CORRECTED, bolds: BOLD_RANGES } = useMemo(() => parseMd(CORRECTED_MD), [CORRECTED_MD]);
+  const CORRECTED_MD_PARAS = useMemo(() => CORRECTED_MD.split("\n\n"), [CORRECTED_MD]);
+  const POS_ANNS = useMemo(() => buildPosAnns(ORIGINAL, CORRECTED, ANNOTATIONS_DEF), [ORIGINAL, CORRECTED, ANNOTATIONS_DEF]);
+
   const [viewMode, setViewMode] = useState("side");
   const [tooltip, setTooltip] = useState(null);
   const [copiedIdx, setCopiedIdx] = useState(null);
   const copyTimerRef = useRef(null);
 
-  const diff = useMemo(() => computeDiff(ORIGINAL, CORRECTED), []);
-  const adiff = useMemo(() => annotateDiff(diff), [diff]);
+  const diff = useMemo(() => computeDiff(ORIGINAL, CORRECTED), [ORIGINAL, CORRECTED]);
+  const adiff = useMemo(() => annotateDiff(diff, POS_ANNS, BOLD_RANGES), [diff, POS_ANNS, BOLD_RANGES]);
   const paraGroups = useMemo(() => splitIntoParagraphs(adiff), [adiff]);
   const changes = adiff.filter(d => d.type !== "same").length;
-
-  const leftRef = useRef(null);
-  const rightRef = useRef(null);
-  const syncing = useRef(false);
-  const syncScroll = useCallback((src) => {
-    if (syncing.current) return;
-    syncing.current = true;
-    const s = src === "l" ? leftRef.current : rightRef.current;
-    const t = src === "l" ? rightRef.current : leftRef.current;
-    if (s && t) t.scrollTop = s.scrollTop / (s.scrollHeight - s.clientHeight || 1) * (t.scrollHeight - t.clientHeight || 1);
-    requestAnimationFrame(() => { syncing.current = false; });
-  }, []);
 
   const showTip = useCallback((reason, e) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -194,17 +311,16 @@ export default function DiffViewer() {
   }, []);
 
   const copyParagraph = useCallback((paraIdx, e) => {
-    // テキスト選択中はブラウザ標準のコピーを優先
     const sel = window.getSelection();
     if (sel && sel.toString().trim().length > 0) return;
     const md = CORRECTED_MD_PARAS[paraIdx] || "";
     if (md) { copyText(md); flashCopy(paraIdx); }
-  }, [flashCopy]);
+  }, [CORRECTED_MD_PARAS, flashCopy]);
 
   const copyAll = useCallback(() => {
     copyText(CORRECTED_MD);
     flashCopy("all");
-  }, [flashCopy]);
+  }, [CORRECTED_MD, flashCopy]);
 
   const textStyle = { fontFamily: F, fontSize: 15, lineHeight: 2, color: C.text, whiteSpace: "pre-wrap", wordBreak: "break-all" };
 
@@ -259,7 +375,13 @@ export default function DiffViewer() {
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: C.bg, fontFamily: F }}>
       <header style={{ background: C.header, color: C.headerText, padding: "14px 24px",
         display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {onBack && (
+            <button onClick={onBack} style={{
+              background: "transparent", border: "none", color: C.headerText, cursor: "pointer",
+              fontSize: 16, padding: "4px 8px", borderRadius: 4, opacity: 0.7,
+            }}>&#x2190; 戻る</button>
+          )}
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>校正ビューワー</h1>
           <span style={{ fontSize: 11, opacity: 0.45, letterSpacing: "0.08em" }}>DIFF VIEWER</span>
         </div>
@@ -271,8 +393,8 @@ export default function DiffViewer() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "10px 24px", background: C.surface, borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
         <div style={{ display: "flex", gap: 6 }}>
-          <Btn active={viewMode === "side"} onClick={() => setViewMode("side")}>◫ 並列</Btn>
-          <Btn active={viewMode === "inline"} onClick={() => setViewMode("inline")}>≡ インライン</Btn>
+          <Btn active={viewMode === "side"} onClick={() => setViewMode("side")}>&#x25EB; 並列</Btn>
+          <Btn active={viewMode === "inline"} onClick={() => setViewMode("inline")}>&#x2261; インライン</Btn>
         </div>
         <div style={{ fontSize: 11, color: C.muted }}>クリックで段落コピー（md） ／ ドラッグで部分選択 ／ 点線ホバーで修正理由</div>
       </div>
@@ -280,7 +402,6 @@ export default function DiffViewer() {
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {viewMode === "side" ? (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-            {/* Column headers */}
             <div style={{ display: "flex", flexShrink: 0 }}>
               <div style={{ flex: 1, borderRight: `1px solid ${C.border}` }}>
                 <PanelHeader color={C.delText} label="原文" />
@@ -289,7 +410,6 @@ export default function DiffViewer() {
                 <PanelHeader color={C.addText} label="校正後" />
               </div>
             </div>
-            {/* Aligned rows */}
             <div style={{ flex: 1, overflow: "auto", padding: "12px 0" }}>
               {paraGroups.map((g, pi) => (
                 <div key={pi} style={{ display: "flex", borderBottom: `1px solid ${C.border}22`, minHeight: 20 }}>
@@ -333,7 +453,7 @@ export default function DiffViewer() {
           border: "none", cursor: "pointer",
           background: copiedIdx === "all" ? C.addText : C.accent,
           color: "#fff", boxShadow: `0 2px 8px ${C.accent}44`, transition: "background 0.15s",
-        }}>{copiedIdx === "all" ? "✓ コピーしました" : "📋 全文コピー（md）"}</button>
+        }}>{copiedIdx === "all" ? "\u2713 コピーしました" : "\uD83D\uDCCB 全文コピー（md）"}</button>
       </div>
 
       {tooltip && (
@@ -356,8 +476,29 @@ export default function DiffViewer() {
           position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)",
           background: C.header, color: C.headerText, fontSize: 13, fontWeight: 600,
           padding: "8px 20px", borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.2)", zIndex: 9999,
-        }}>✓ 段落をコピーしました</div>
+        }}>{"\u2713"} 段落をコピーしました</div>
       )}
     </div>
   );
+}
+
+/* ══════════════════════════════════════
+   APP (router)
+   ══════════════════════════════════════ */
+
+export default function App() {
+  const [data, setData] = useState(null);
+
+  // 起動時に既存の data.json があれば読み込む
+  useEffect(() => {
+    fetch(`${API_BASE}/data`)
+      .then(r => { if (r.ok) return r.json(); throw new Error(); })
+      .then(d => { if (d.original && d.corrected_md) setData(d); })
+      .catch(() => {});
+  }, []);
+
+  if (data) {
+    return <DiffViewer data={data} onBack={() => setData(null)} />;
+  }
+  return <InputScreen onResult={setData} />;
 }

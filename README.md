@@ -2,7 +2,7 @@
 
 校正前後のテキストを並列・インライン表示で比較し、修正箇所をハイライト、修正理由をツールチップで確認できるビューワーです。
 
-Claude Code の `/proofread` コマンドでテキストを校正し、結果をそのままブラウザでプレビューできます。
+Claude / OpenAI (Codex) / Gemini の各 CLI に対応しており、お使いのサブスクリプションで校正を実行できます。
 
 ## セットアップ
 
@@ -12,29 +12,56 @@ cd proof-reader
 npm install
 ```
 
+### AI CLI のインストール（いずれか1つ以上）
+
+| プロバイダ | CLI | インストール | 認証 |
+|---|---|---|---|
+| Claude | Claude Code | `npm i -g @anthropic-ai/claude-code` | `claude` → ブラウザログイン |
+| OpenAI | Codex CLI | `npm i -g @openai/codex` | `codex` → ブラウザログイン |
+| Gemini | Gemini CLI | `npm i -g @google/gemini-cli` | `gemini` → Google アカウントログイン |
+
 ## 使い方
 
-### 方法 1: Claude Code コマンド（推奨）
-
-このプロジェクトのディレクトリで Claude Code を起動し、以下のように実行します。
-
-```
-/proofread
-```
-
-プロンプトに従って校正対象のテキストを貼り付けると、校正結果が `data/data.json` に出力されます。
-
-その後、ビューワーを起動します。
+### Web UI（推奨）
 
 ```bash
-npm run dev
+npm start
 ```
 
-### 方法 2: 手動で JSON を配置
+ブラウザで `http://localhost:5173` を開くと:
+
+1. プロバイダを選択（Claude / Codex / Gemini）
+2. 校正対象テキストを貼り付け
+3. 「校正する」をクリック
+4. 校正結果がビューワーに表示される
+5. 「全文コピー」で校正済みテキストを取得
+
+### Claude Code コマンド
+
+このプロジェクトのディレクトリで Claude Code を起動し:
+
+```
+/proofread <テキスト>
+```
+
+校正結果が `data/data.json` に出力されるので `npm run dev` でビューワーを起動。
+
+### 手動で JSON を配置
 
 1. `data/data.sample.json` を `data/data.json` にコピーする
 2. JSON の中身を校正データに差し替える
-3. `npm run dev` でローカルサーバーを起動する
+3. `npm run dev` でビューワーを起動する
+
+## note.com 連携（Bookmarklet）
+
+note.com の下書きから直接テキストを取得し、校正後に貼り戻すワークフローを Bookmarklet でサポートしています。
+
+`bookmarklets.html` をブラウザで開き、Bookmarklet をブックマークに登録してください。
+
+1. note.com のエディタで下書きを開く
+2. **「note テキスト取得」** Bookmarklet を実行 → テキストがクリップボードにコピーされる
+3. Web UI にテキストを貼り付けて校正
+4. 「全文コピー」で校正済みテキストをコピー → note.com に貼り戻す
 
 ## data.json のフォーマット
 
@@ -51,37 +78,6 @@ npm run dev
   ]
 }
 ```
-
-| フィールド | 説明 |
-|---|---|
-| `original` | 校正前の原文。段落区切りは `\n\n`、段落内改行は `\n` |
-| `corrected_md` | 校正後テキスト。`**太字**` の Markdown 記法に対応 |
-| `annotations` | 修正箇所と理由の配列。ビューワー上で点線+ツールチップとして表示される |
-
-## note.com 連携（Bookmarklet）
-
-note.com の下書きから直接テキストを取得し、校正後に貼り戻すワークフローを Bookmarklet でサポートしています。
-
-### セットアップ
-
-`bookmarklets.html` をブラウザで開き、ボタンをブックマークバーにドラッグしてください。
-
-```bash
-# ローカルで開く場合
-start bookmarklets.html   # Windows
-open bookmarklets.html    # macOS
-```
-
-### ワークフロー
-
-1. note.com のエディタで下書きを開く
-2. **「note テキスト取得」** Bookmarklet をクリック → テキストがクリップボードにコピーされる
-3. Claude Code で `/proofread <貼り付け>` を実行 → `data/data.json` が生成される
-4. `npm run dev` でビューワーを開き、校正結果を確認
-5. ビューワーの「全文コピー」ボタンで校正済みテキストをコピー
-6. note.com のエディタに戻り、テキストを差し替える
-
-詳細は `bookmarklets.html` を参照してください。
 
 ## ビューワーの機能
 
